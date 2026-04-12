@@ -23,11 +23,15 @@
     "@circular/shared": "*",
     "@prisma/adapter-pg": "^7.7.0",
     "@prisma/client": "^7.7.0",
+    "bcrypt": "^6.0.0",
     "dotenv": "^16.4.5",
     "fastify": "^5.1.0",
+    "jsonwebtoken": "^9.0.3",
     "pg": "^8.20.0"
   },
   "devDependencies": {
+    "@types/bcrypt": "^6.0.0",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^24.12.2",
     "@types/pg": "^8.20.0",
     "prisma": "^7.7.0",

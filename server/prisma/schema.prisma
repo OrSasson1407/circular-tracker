@@ -12,7 +12,8 @@ datasource db {
   // URL is managed via prisma.config.ts
 }
 
-// 1. Enums for type safety in the database
+// ─── Enums ───────────────────────────────────────────────────────
+
 enum ItemStatus {
   ACTIVE
   STALE
@@ -29,24 +30,36 @@ enum Category {
   OTHER
 }
 
-// 2. The Core Inventory Model
+// ─── Models ──────────────────────────────────────────────────────
+
+model User {
+  id           String          @id @default(uuid())
+  email        String          @unique
+  passwordHash String
+  businessName String
+  createdAt    DateTime        @default(now())
+  items        InventoryItem[]
+
+  @@map("users")
+}
+
 model InventoryItem {
   id             String     @id @default(uuid())
   name           String
   category       Category   @default(OTHER)
-  weight         Float      // stored in kg
+  weight         Float
   barcode        String?    @unique
   imageUrl       String?
-  
-  // Dates for Waste Logic (Phase 3)
+
   addedAt        DateTime   @default(now())
   lastAccessedAt DateTime   @default(now())
-  
-  // Predictive Logic fields
-  // riskLevel: 0.0 (Fresh) to 1.0 (Stale)
+
   riskLevel      Float      @default(0.0)
   status         ItemStatus @default(ACTIVE)
 
-  // Meta-data
+  // Each item belongs to a business (User)
+  userId         String
+  user           User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@map("inventory_items")
 }

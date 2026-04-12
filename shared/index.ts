@@ -6,32 +6,58 @@ export interface InventoryItem {
   id: string;
   name: string;
   category: ItemCategory;
-  weight: number;      // in kg
-  barcode?: string;    // Optional: for items found via scanning
+  weight: number;
+  barcode?: string;
   imageUrl?: string;
-  
-  // Dates for Waste Logic
   addedAt: Date;
   lastAccessedAt: Date;
-  
-  // Predictive Logic fields
-  riskLevel: number;   // 0.0 (Fresh) to 1.0+ (Stale/Waste Risk)
+  riskLevel: number;
   status: 'Active' | 'Stale' | 'Donated' | 'Recycled';
+  userId: string;
 }
 
 // 3. Sustainability Score Interface
 export interface SustainabilityScore {
-  co2Saved: number;    // Calculated: Weight * Category Factor
-  points: number;      // Gamification for the business
+  co2Saved: number;
+  points: number;
   rank: 'Bronze' | 'Silver' | 'Gold' | 'Green Titan';
 }
 
-// 4. API Request/Response Types (To keep your fetch calls safe)
+// 4. Auth types
+export interface RegisterRequest {
+  email: string;
+  password: string;
+  businessName: string;
+}
+
+export interface LoginRequest {
+  email: string;
+  password: string;
+}
+
+export interface AuthResponse {
+  token: string;
+  user: {
+    id: string;
+    email: string;
+    businessName: string;
+  };
+}
+
+// 5. Item Request/Response Types
 export interface CreateItemRequest {
   name: string;
   category: ItemCategory;
   weight: number;
   barcode?: string;
+}
+
+export interface UpdateItemRequest {
+  name?: string;
+  category?: ItemCategory;
+  weight?: number;
+  barcode?: string;
+  status?: 'Active' | 'Stale' | 'Donated' | 'Recycled';
 }
 
 export interface InventoryResponse {
