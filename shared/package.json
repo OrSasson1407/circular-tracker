@@ -1,5 +1,13 @@
 {
   "name": "@circular/shared",
   "version": "1.0.0",
-  "main": "index.ts"
+  "main": "index.ts",
+  "description": "",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs"
 }

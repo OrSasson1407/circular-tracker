@@ -1,7 +1,6 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
+// ----------------------------------------------------------------
+// 📋 Prisma 7 Schema for Circular Tracker
+// ----------------------------------------------------------------
 
 generator client {
   provider = "prisma-client"
@@ -10,4 +9,44 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+  // URL is managed via prisma.config.ts
+}
+
+// 1. Enums for type safety in the database
+enum ItemStatus {
+  ACTIVE
+  STALE
+  DONATED
+  RECYCLED
+}
+
+enum Category {
+  TEXTILE
+  WOOD
+  METAL
+  PLASTIC
+  GLASS
+  OTHER
+}
+
+// 2. The Core Inventory Model
+model InventoryItem {
+  id             String     @id @default(uuid())
+  name           String
+  category       Category   @default(OTHER)
+  weight         Float      // stored in kg
+  barcode        String?    @unique
+  imageUrl       String?
+  
+  // Dates for Waste Logic (Phase 3)
+  addedAt        DateTime   @default(now())
+  lastAccessedAt DateTime   @default(now())
+  
+  // Predictive Logic fields
+  // riskLevel: 0.0 (Fresh) to 1.0 (Stale)
+  riskLevel      Float      @default(0.0)
+  status         ItemStatus @default(ACTIVE)
+
+  // Meta-data
+  @@map("inventory_items")
 }
