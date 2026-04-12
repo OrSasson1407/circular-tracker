@@ -28,7 +28,7 @@ interface AuthUser {
 
 // ─── API ─────────────────────────────────────────────────────────────────────
 
-const API = 'http://localhost:3001'
+const API = ''
 const getToken = () => localStorage.getItem('token')
 
 const apiFetch = async (path: string, options: RequestInit = {}) => {
