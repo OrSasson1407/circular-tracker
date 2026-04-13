@@ -18,7 +18,7 @@ export default defineConfig({
         orientation: 'portrait',
         scope: '/',
         start_url: '/',
-        icons: [
+       icons: [
           {
             src: '/logo.png',
             sizes: '192x192',
