@@ -237,7 +237,7 @@ function AuthPage({ onAuth }: { onAuth: (user: AuthUser, token: string) => void 
       <div className="auth-card">
         <div className="auth-logo">
           <span className="auth-logo-icon">♻️</span>
-          <h1 className="auth-title">Circular</h1>
+          <h1 className="auth-title">Circura</h1>
           <p className="auth-subtitle">Inventory that cares about the planet</p>
         </div>
         <div className="auth-tabs">
@@ -815,7 +815,7 @@ function exportCSV(items: InventoryItem[]) {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = `circular-inventory-${new Date().toISOString().slice(0, 10)}.csv`
+  a.download = `circura-inventory-${new Date().toISOString().slice(0, 10)}.csv`
   a.click()
   URL.revokeObjectURL(url)
 }
@@ -954,7 +954,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
       <ToastContainer toasts={toasts} onRemove={removeToast} />
 
       <header className="dash-header">
-        <div className="dash-brand"><span>♻️</span><span className="dash-brand-name">Circular</span></div>
+        <div className="dash-brand"><span>♻️</span><span className="dash-brand-name">Circura</span></div>
         <div className="dash-user">
           <span className="dash-business">{user.businessName}</span>
           <button className="btn-icon" onClick={() => setShowPasswordChange(true)} title="Change password">🔑</button>

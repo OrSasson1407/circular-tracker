@@ -7,7 +7,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.svg', 'icons.svg'],
+      includeAssets: ['logo.png', 'logo.svg'],
       manifest: {
         name: 'Circular Inventory Tracker',
         short_name: 'Circular',
