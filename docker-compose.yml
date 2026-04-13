@@ -32,5 +32,20 @@ services:
       db:
         condition: service_healthy
 
+  nginx:
+    image: nginx:1.27-alpine
+    restart: always
+    profiles:
+      - production
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ${SSL_CERT_PATH:-/dev/null}:/etc/nginx/certs/fullchain.pem:ro
+      - ${SSL_KEY_PATH:-/dev/null}:/etc/nginx/certs/privkey.pem:ro
+    depends_on:
+      - server
+
 volumes:
   postgres_data:

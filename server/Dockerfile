@@ -4,11 +4,11 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 
 COPY shared/ ./shared/
-COPY server/package.json ./server/
-COPY package.json ./
+COPY server/package.json server/package-lock.json ./server/
+COPY package.json package-lock.json ./
 
 WORKDIR /app/server
-RUN npm install --legacy-peer-deps
+RUN npm ci --legacy-peer-deps
 
 COPY server/ ./
 

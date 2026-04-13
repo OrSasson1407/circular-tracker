@@ -49,6 +49,10 @@ interface Toast {
   type: ToastType
 }
 
+interface DonatePrompt {
+  item: InventoryItem
+}
+
 // ─── API ─────────────────────────────────────────────────────────────────────
 
 const API = import.meta.env.VITE_API_URL ?? ''
@@ -59,7 +63,7 @@ const apiFetch = async (path: string, options: RequestInit = {}) => {
   const res = await fetch(`${API}${path}`, {
     ...options,
     headers: {
-      'Content-Type': 'application/json',
+      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...options.headers,
     },
@@ -409,6 +413,54 @@ function EditItemModal({ item, onClose, onSaved, toast }: {
   )
 }
 
+// ─── Donate Modal ────────────────────────────────────────────────────────────
+
+function DonateModal({ item, onDonate, onDismiss }: {
+  item: InventoryItem
+  onDonate: (item: InventoryItem) => void
+  onDismiss: () => void
+}) {
+  const [loading, setLoading] = useState(false)
+
+  const daysSinceAccess = Math.floor(
+    (Date.now() - new Date(item.lastAccessedAt).getTime()) / (1000 * 60 * 60 * 24)
+  )
+
+  const handleDonate = async () => {
+    setLoading(true)
+    try {
+      await apiFetch(`/api/items/${item.id}`, { method: 'PUT', body: JSON.stringify({ status: 'Donated' }) })
+      onDonate(item)
+    } catch { setLoading(false) }
+  }
+
+  return (
+    <div className="modal-overlay" onClick={onDismiss}>
+      <div className="modal donate-modal" onClick={e => e.stopPropagation()}>
+        <div className="donate-modal-icon">♻️</div>
+        <h2 className="donate-modal-title">Ready to donate?</h2>
+        <p className="donate-modal-body">
+          <strong>{item.name}</strong> hasn't moved in <strong>{daysSinceAccess} days</strong>.
+          Donating it keeps it out of landfill and boosts your sustainability score.
+        </p>
+        <div className="donate-modal-item-row">
+          <span className="donate-modal-icon-sm">{CATEGORY_ICONS[item.category as ItemCategory]}</span>
+          <span className="donate-modal-item-name">{item.name}</span>
+          <span className="donate-modal-item-meta">{item.category} · {item.weight}kg</span>
+        </div>
+        <div className="modal-actions">
+          <button className="btn-secondary" onClick={onDismiss} disabled={loading}>
+            Dismiss
+          </button>
+          <button className="btn-donate" onClick={handleDonate} disabled={loading}>
+            {loading ? 'Marking…' : 'Mark as Donated ♻️'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Item Card ────────────────────────────────────────────────────────────────
 
 function ItemCard({ item, onDelete, onStatusChange, onEdit, toast }: {
@@ -425,7 +477,10 @@ function ItemCard({ item, onDelete, onStatusChange, onEdit, toast }: {
       await apiFetch(`/api/items/${item.id}`, { method: 'DELETE' })
       toast(`"${item.name}" deleted`, 'warning')
       onDelete(item.id)
-    } catch { setDeleting(false) }
+    } catch (e: any) {
+      toast(e.message || 'Failed to delete item', 'error')
+      setDeleting(false)
+    }
   }
 
   const handleStatus = async (status: ItemStatus) => {
@@ -434,7 +489,10 @@ function ItemCard({ item, onDelete, onStatusChange, onEdit, toast }: {
       await apiFetch(`/api/items/${item.id}`, { method: 'PUT', body: JSON.stringify({ status }) })
       toast(`Marked as ${status}`)
       onStatusChange()
-    } catch {}
+    } catch (e: any) {
+      toast(e.message || 'Failed to update status', 'error')
+      onStatusChange() // re-fetch to ensure UI is in sync with server
+    }
   }
 
   const riskPct = Math.min(item.riskLevel * 100, 100)
@@ -577,10 +635,11 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
   const [filterCategory, setFilterCategory] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
   const [sustainability, setSustainability] = useState<SustainabilityResult | null>(null)
+  const [donateQueue, setDonateQueue] = useState<DonatePrompt[]>([])
   const { toasts, add: addToast, remove: removeToast } = useToast()
   const prevStaleIds = useRef<Set<string>>(new Set())
 
-  const fetchItems = async () => {
+  const fetchItems = useCallback(async () => {
     setLoading(true)
     try {
       const params = new URLSearchParams()
@@ -590,23 +649,32 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
       const data = await apiFetch(`/api/items?${params}`)
       const fetched: InventoryItem[] = data.items
 
-      // Notify for newly stale items
-      fetched.forEach(i => {
-        if (i.status === 'Stale' && !prevStaleIds.current.has(i.id)) {
-          addToast(`⚠ "${i.name}" is now at risk — consider donating`, 'warning')
-        }
-      })
+      // Queue newly stale items for the donate prompt
+      const newlyStale = fetched.filter(
+        i => i.status === 'Stale' && !prevStaleIds.current.has(i.id)
+      )
+      if (newlyStale.length > 0) {
+        setDonateQueue(prev => [...prev, ...newlyStale.map(item => ({ item }))])
+      }
       prevStaleIds.current = new Set(fetched.filter(i => i.status === 'Stale').map(i => i.id))
 
       setItems(fetched)
       setSustainability(data.globalSustainability ?? null)
     } catch {}
     finally { setLoading(false) }
-  }
+  }, [search, filterCategory, filterStatus, addToast])
 
-  useEffect(() => { fetchItems() }, [search, filterCategory, filterStatus])
+  useEffect(() => { fetchItems() }, [fetchItems])
 
   const handleDelete = (id: string) => setItems(prev => prev.filter(i => i.id !== id))
+
+  const handleDonateConfirm = (item: InventoryItem) => {
+    addToast(`"${item.name}" marked as donated — great work! 🌍`, 'success')
+    setDonateQueue(prev => prev.slice(1))
+    fetchItems()
+  }
+
+  const handleDonatesDismiss = () => setDonateQueue(prev => prev.slice(1))
   const activeCount = items.filter(i => i.status === 'Active').length
   const staleCount = items.filter(i => i.status === 'Stale').length
   const totalWeight = items.reduce((sum, i) => sum + i.weight, 0)
@@ -660,6 +728,13 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
 
       {showAdd && <AddItemModal onClose={() => setShowAdd(false)} onAdded={fetchItems} toast={addToast} />}
       {editItem && <EditItemModal item={editItem} onClose={() => setEditItem(null)} onSaved={fetchItems} toast={addToast} />}
+      {donateQueue.length > 0 && (
+        <DonateModal
+          item={donateQueue[0].item}
+          onDonate={handleDonateConfirm}
+          onDismiss={handleDonatesDismiss}
+        />
+      )}
     </div>
   )
 }

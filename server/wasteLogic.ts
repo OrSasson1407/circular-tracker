@@ -13,6 +13,9 @@ const THRESHOLDS_DAYS: Record<Category, number> = {
   OTHER:    60,
 }
 
+// Max updates to send in a single $transaction to avoid exhausting the DB connection pool
+const CHUNK_SIZE = 100
+
 /**
  * ♻️ runWasteLogic
  * Recalculates riskLevel for every ACTIVE item and marks as STALE if risk >= 1.0
@@ -34,7 +37,8 @@ export async function runWasteLogic(prisma: PrismaClient): Promise<void> {
   let markedStale = 0
   let markedActive = 0
 
-  const updates = activeItems.map(async (item) => {
+  // Compute all new values first, without touching the DB
+  const payloads = activeItems.map((item) => {
     const thresholdDays = THRESHOLDS_DAYS[item.category]
     const thresholdMs = thresholdDays * 24 * 60 * 60 * 1000
     const daysSinceAccess = now.getTime() - new Date(item.lastAccessedAt).getTime()
@@ -46,13 +50,19 @@ export async function runWasteLogic(prisma: PrismaClient): Promise<void> {
     if (newStatus === ItemStatus.STALE && item.status !== ItemStatus.STALE) markedStale++
     if (newStatus === ItemStatus.ACTIVE && item.status === ItemStatus.STALE) markedActive++
 
-    return prisma.inventoryItem.update({
-      where: { id: item.id },
-      data: { riskLevel, status: newStatus },
-    })
+    return { id: item.id, riskLevel, status: newStatus }
   })
 
-  await Promise.all(updates)
+  // Write in chunks of CHUNK_SIZE — each chunk is a single atomic transaction,
+  // keeping individual transaction sizes small and connection pool usage bounded
+  for (let i = 0; i < payloads.length; i += CHUNK_SIZE) {
+    const chunk = payloads.slice(i, i + CHUNK_SIZE)
+    await prisma.$transaction(
+      chunk.map(({ id, riskLevel, status }) =>
+        prisma.inventoryItem.update({ where: { id }, data: { riskLevel, status } })
+      )
+    )
+  }
 
   console.log(
     `✅ Waste logic complete: ${activeItems.length} items processed, ` +

@@ -19,7 +19,7 @@ if (!process.env.JWT_SECRET) {
   process.exit(1)
 }
 
-const JWT_SECRET = process.env.JWT_SECRET
+const JWT_SECRET = process.env.JWT_SECRET as string
 const SALT_ROUNDS = 10
 
 // ─── Prisma Setup ────────────────────────────────────────────────────────────
@@ -172,6 +172,10 @@ fastify.post<{ Body: CreateItemRequest }>('/api/items', async (request, reply) =
 
   const { name, category, weight, barcode, imageUrl } = request.body
 
+  if (!name || !category || weight == null) {
+    return reply.status(400).send({ error: 'name, category, and weight are required' })
+  }
+
   try {
     const newItem = await prisma.inventoryItem.create({
       data: {
@@ -212,7 +216,7 @@ fastify.put<{ Params: { id: string }; Body: UpdateItemRequest }>(
           ...(name !== undefined && { name }),
           ...(category !== undefined && { category: normalizeCategory(category) }),
           ...(weight !== undefined && { weight }),
-          ...(barcode !== undefined && { barcode }),
+          ...(barcode !== undefined && barcode !== existing.barcode && { barcode }),
           ...(imageUrl !== undefined && { imageUrl }),
           ...(status !== undefined && { status: normalizeStatus(status) }),
           lastAccessedAt: new Date(),

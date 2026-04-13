@@ -40,7 +40,7 @@ export async function calculateSustainability(
   userId: string
 ): Promise<SustainabilityResult> {
   const items = await prisma.inventoryItem.findMany({
-    where: { userId },
+    where: { userId, status: { in: [ItemStatus.ACTIVE, ItemStatus.STALE] } },
     select: { category: true, weight: true, status: true },
   })
 
