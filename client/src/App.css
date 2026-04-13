@@ -778,3 +778,134 @@ input, select, button { font-family: inherit; font-size: inherit; }
 .btn-donate:hover { opacity: 0.9; }
 .btn-donate:active { transform: scale(0.98); }
 .btn-donate:disabled { opacity: 0.5; cursor: not-allowed; }
+/* ─── Fetch Error State ─────────────────────────────────────────────────── */
+.fetch-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 48px 24px;
+  text-align: center;
+  color: var(--text-muted);
+}
+.fetch-error-icon { font-size: 40px; }
+.fetch-error p { font-size: 15px; color: var(--text); }
+
+/* ─── Sort + Toolbar additions ──────────────────────────────────────────── */
+.btn-icon {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 15px;
+  transition: border-color 0.15s, color 0.15s;
+}
+.btn-icon:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ─── Bulk Action Bar ───────────────────────────────────────────────────── */
+.bulk-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: var(--surface2);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.bulk-count {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  margin-right: 4px;
+}
+.btn-bulk {
+  padding: 6px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.btn-bulk:hover { border-color: var(--accent); }
+.btn-bulk:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-bulk-delete { color: #ef4444; border-color: #ef444440; }
+.btn-bulk-delete:hover { border-color: #ef4444; }
+.btn-bulk-clear { color: var(--text-muted); margin-left: auto; }
+
+/* ─── Select all row ────────────────────────────────────────────────────── */
+.select-all-row {
+  padding: 4px 0 8px;
+}
+.select-all-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+.select-all-label input { cursor: pointer; }
+
+/* ─── Item checkbox ─────────────────────────────────────────────────────── */
+.item-checkbox {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 2;
+  cursor: pointer;
+}
+.item-checkbox input { cursor: pointer; width: 16px; height: 16px; }
+.item-card { position: relative; }
+.item-card.selected { border-color: var(--accent) !important; box-shadow: 0 0 0 2px var(--accent)30; }
+
+/* ─── History Modal ─────────────────────────────────────────────────────── */
+.history-item-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-muted);
+  padding: 0 24px 16px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+.history-list {
+  max-height: 420px;
+  overflow-y: auto;
+  padding: 8px 0;
+}
+.history-loading, .history-empty {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 32px;
+  font-size: 14px;
+}
+.history-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 24px;
+  border-bottom: 1px solid var(--border);
+  transition: background 0.1s;
+}
+.history-row:hover { background: var(--surface2); }
+.history-icon { font-size: 18px; flex-shrink: 0; margin-top: 1px; }
+.history-info { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.history-event {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  text-transform: capitalize;
+}
+.history-detail { font-size: 12px; color: var(--text-muted); }
+.history-time {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}

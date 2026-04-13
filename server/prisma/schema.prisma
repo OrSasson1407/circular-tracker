@@ -60,6 +60,18 @@ model InventoryItem {
   // Each item belongs to a business (User)
   userId         String
   user           User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  activityLogs   ItemActivityLog[]
 
   @@map("inventory_items")
+}
+
+model ItemActivityLog {
+  id        String   @id @default(uuid())
+  itemId    String
+  item      InventoryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  event     String   // e.g. "added", "status_changed", "edited", "accessed"
+  detail    String?  // e.g. "Status: Active → Donated"
+  createdAt DateTime @default(now())
+
+  @@map("item_activity_logs")
 }

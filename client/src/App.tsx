@@ -58,6 +58,10 @@ interface DonatePrompt {
 const API = import.meta.env.VITE_API_URL ?? ''
 const getToken = () => localStorage.getItem('token')
 
+// Called by apiFetch when it receives a 401 — clears auth state and redirects to login
+let _onSessionExpired: (() => void) | null = null
+export const setSessionExpiredHandler = (fn: () => void) => { _onSessionExpired = fn }
+
 const apiFetch = async (path: string, options: RequestInit = {}) => {
   const token = getToken()
   const res = await fetch(`${API}${path}`, {
@@ -68,6 +72,13 @@ const apiFetch = async (path: string, options: RequestInit = {}) => {
       ...options.headers,
     },
   })
+  if (res.status === 401) {
+    // Token expired or invalid — clear stored credentials and return to login
+    localStorage.removeItem('token')
+    localStorage.removeItem('user')
+    _onSessionExpired?.()
+    throw new Error('Session expired. Please sign in again.')
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: 'Request failed' }))
     throw new Error(err.error || 'Request failed')
@@ -318,15 +329,28 @@ function AddItemModal({ onClose, onAdded, toast }: {
   const [loading, setLoading] = useState(false)
   const [showScanner, setShowScanner] = useState(false)
 
-  const handleBarcodeDetected = (code: string) => { setBarcode(code); setShowScanner(false) }
+  const handleBarcodeDetected = async (code: string) => {
+    setBarcode(code)
+    setShowScanner(false)
+    // Try to auto-fill name and category from OpenFoodFacts
+    try {
+      const product = await apiFetch(`/api/barcode/${encodeURIComponent(code)}`)
+      if (product.name) setName(product.name)
+      if (product.category) setCategory(product.category as ItemCategory)
+    } catch {
+      // Product not found — user can fill in name manually
+    }
+  }
 
   const submit = async () => {
-    if (!name || !weight) { setError('Name and weight are required'); return }
+    if (!name) { setError('Name is required'); return }
+    const w = parseFloat(weight)
+    if (!weight || isNaN(w) || w <= 0) { setError('Weight must be greater than 0'); return }
     setError(''); setLoading(true)
     try {
       await apiFetch('/api/items', {
         method: 'POST',
-        body: JSON.stringify({ name, category, weight: parseFloat(weight), barcode: barcode || undefined, imageUrl: imageUrl || undefined }),
+        body: JSON.stringify({ name, category, weight: w, barcode: barcode || undefined, imageUrl: imageUrl || undefined }),
       })
       toast(`"${name}" added to inventory`)
       onAdded(); onClose()
@@ -373,15 +397,25 @@ function EditItemModal({ item, onClose, onSaved, toast }: {
   const [loading, setLoading] = useState(false)
   const [showScanner, setShowScanner] = useState(false)
 
-  const handleBarcodeDetected = (code: string) => { setBarcode(code); setShowScanner(false) }
+  const handleBarcodeDetected = async (code: string) => {
+    setBarcode(code)
+    setShowScanner(false)
+    try {
+      const product = await apiFetch(`/api/barcode/${encodeURIComponent(code)}`)
+      if (product.name && !item.name) setName(product.name)
+      if (product.category) setCategory(product.category as ItemCategory)
+    } catch {}
+  }
 
   const submit = async () => {
-    if (!name || !weight) { setError('Name and weight are required'); return }
+    if (!name) { setError('Name is required'); return }
+    const w = parseFloat(weight)
+    if (!weight || isNaN(w) || w <= 0) { setError('Weight must be greater than 0'); return }
     setError(''); setLoading(true)
     try {
       await apiFetch(`/api/items/${item.id}`, {
         method: 'PUT',
-        body: JSON.stringify({ name, category, weight: parseFloat(weight), barcode: barcode || undefined, imageUrl: imageUrl || undefined }),
+        body: JSON.stringify({ name, category, weight: w, barcode: barcode || undefined, imageUrl: imageUrl || undefined }),
       })
       toast(`"${name}" updated`)
       onSaved(); onClose()
@@ -463,10 +497,12 @@ function DonateModal({ item, onDonate, onDismiss }: {
 
 // ─── Item Card ────────────────────────────────────────────────────────────────
 
-function ItemCard({ item, onDelete, onStatusChange, onEdit, toast }: {
+function ItemCard({ item, onDelete, onStatusChange, onEdit, onHistory, toast, selected, onSelect }: {
   item: InventoryItem; onDelete: (id: string) => void
   onStatusChange: () => void; onEdit: (item: InventoryItem) => void
+  onHistory: (item: InventoryItem) => void
   toast: (msg: string, type?: ToastType) => void
+  selected?: boolean; onSelect?: (id: string) => void
 }) {
   const [deleting, setDeleting] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -499,7 +535,12 @@ function ItemCard({ item, onDelete, onStatusChange, onEdit, toast }: {
   const riskColor = riskPct < 40 ? '#22c55e' : riskPct < 80 ? '#f59e0b' : '#ef4444'
 
   return (
-    <div className={`item-card ${deleting ? 'deleting' : ''}`}>
+    <div className={`item-card ${deleting ? 'deleting' : ''} ${selected ? 'selected' : ''}`}>
+      {onSelect && (
+        <label className="item-checkbox" onClick={e => e.stopPropagation()}>
+          <input type="checkbox" checked={!!selected} onChange={() => onSelect(item.id)} />
+        </label>
+      )}
       {item.imageUrl && (
         <div className="item-card-image">
           <img src={item.imageUrl} alt={item.name} />
@@ -518,6 +559,7 @@ function ItemCard({ item, onDelete, onStatusChange, onEdit, toast }: {
             {menuOpen && (
               <div className="item-menu">
                 <button onClick={() => { setMenuOpen(false); onEdit(item) }}>✏️ Edit</button>
+                <button onClick={() => { setMenuOpen(false); onHistory(item) }}>📋 History</button>
                 {(['Active', 'Donated', 'Recycled'] as ItemStatus[]).map(s => (
                   <button key={s} onClick={() => handleStatus(s)}>Mark as {s}</button>
                 ))}
@@ -624,16 +666,178 @@ function SustainabilityPanel({ data }: { data: SustainabilityResult }) {
   )
 }
 
+// ─── Item History Modal ───────────────────────────────────────────────────────
+
+interface ActivityLog {
+  id: string
+  event: string
+  detail?: string
+  createdAt: string
+}
+
+const EVENT_ICONS: Record<string, string> = {
+  added: '➕',
+  edited: '✏️',
+  status_changed: '🔄',
+  accessed: '👁',
+}
+
+function ItemHistoryModal({ item, onClose }: { item: InventoryItem; onClose: () => void }) {
+  const [logs, setLogs] = useState<ActivityLog[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    apiFetch(`/api/items/${item.id}/history`)
+      .then(data => setLogs(data.logs))
+      .catch(e => setError(e.message || 'Failed to load history'))
+      .finally(() => setLoading(false))
+  }, [item.id])
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2>Activity History</h2>
+          <button className="modal-close" onClick={onClose}>✕</button>
+        </div>
+        <div className="history-item-name">{CATEGORY_ICONS[item.category]} {item.name}</div>
+        <div className="history-list">
+          {loading && <div className="history-loading">Loading…</div>}
+          {error && <div className="auth-error">{error}</div>}
+          {!loading && !error && logs.length === 0 && (
+            <div className="history-empty">No activity recorded yet.</div>
+          )}
+          {logs.map(log => (
+            <div key={log.id} className="history-row">
+              <span className="history-icon">{EVENT_ICONS[log.event] ?? '📋'}</span>
+              <div className="history-info">
+                <span className="history-event">{log.event.replace('_', ' ')}</span>
+                {log.detail && <span className="history-detail">{log.detail}</span>}
+              </div>
+              <span className="history-time">
+                {new Date(log.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Password Change Modal ───────────────────────────────────────────────────
+
+function PasswordChangeModal({ onClose, toast }: {
+  onClose: () => void
+  toast: (msg: string, type?: ToastType) => void
+}) {
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  const submit = async () => {
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      setError('All fields are required'); return
+    }
+    if (newPassword !== confirmPassword) {
+      setError('New passwords do not match'); return
+    }
+    if (newPassword.length < 8) {
+      setError('New password must be at least 8 characters'); return
+    }
+    setError(''); setLoading(true)
+    try {
+      await apiFetch('/auth/change-password', {
+        method: 'POST',
+        body: JSON.stringify({ currentPassword, newPassword }),
+      })
+      toast('Password updated successfully')
+      onClose()
+    } catch (e: any) { setError(e.message) }
+    finally { setLoading(false) }
+  }
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2>Change Password</h2>
+          <button className="modal-close" onClick={onClose}>✕</button>
+        </div>
+        <div className="auth-form">
+          <div className="field">
+            <label>Current Password</label>
+            <input type="password" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} placeholder="••••••••" />
+          </div>
+          <div className="field">
+            <label>New Password</label>
+            <input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="••••••••" />
+          </div>
+          <div className="field">
+            <label>Confirm New Password</label>
+            <input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="••••••••"
+              onKeyDown={e => e.key === 'Enter' && submit()} />
+          </div>
+          {error && <div className="auth-error">{error}</div>}
+          <div className="modal-actions">
+            <button className="btn-secondary" onClick={onClose}>Cancel</button>
+            <button className="btn-primary" onClick={submit} disabled={loading}>
+              {loading ? 'Updating…' : 'Update Password'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── CSV Export ───────────────────────────────────────────────────────────────
+
+function exportCSV(items: InventoryItem[]) {
+  const headers = ['Name', 'Category', 'Weight (kg)', 'Status', 'Risk Level', 'Barcode', 'Added At', 'Last Accessed']
+  const rows = items.map(i => [
+    i.name,
+    i.category,
+    i.weight,
+    i.status,
+    (i.riskLevel * 100).toFixed(0) + '%',
+    i.barcode ?? '',
+    new Date(i.addedAt).toLocaleDateString(),
+    new Date(i.lastAccessedAt).toLocaleDateString(),
+  ])
+  const csv = [headers, ...rows]
+    .map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+    .join('\n')
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `circular-inventory-${new Date().toISOString().slice(0, 10)}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 // ─── Dashboard ────────────────────────────────────────────────────────────────
+
+type SortKey = 'addedAt' | 'name' | 'riskLevel' | 'weight'
 
 function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
   const [items, setItems] = useState<InventoryItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [fetchError, setFetchError] = useState('')
   const [showAdd, setShowAdd] = useState(false)
   const [editItem, setEditItem] = useState<InventoryItem | null>(null)
   const [search, setSearch] = useState('')
   const [filterCategory, setFilterCategory] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
+  const [sortKey, setSortKey] = useState<SortKey>('addedAt')
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [bulkLoading, setBulkLoading] = useState(false)
+  const [showPasswordChange, setShowPasswordChange] = useState(false)
+  const [historyItem, setHistoryItem] = useState<InventoryItem | null>(null)
   const [sustainability, setSustainability] = useState<SustainabilityResult | null>(null)
   const [donateQueue, setDonateQueue] = useState<DonatePrompt[]>([])
   const { toasts, add: addToast, remove: removeToast } = useToast()
@@ -641,6 +845,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
 
   const fetchItems = useCallback(async () => {
     setLoading(true)
+    setFetchError('')
     try {
       const params = new URLSearchParams()
       if (search) params.set('search', search)
@@ -649,7 +854,6 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
       const data = await apiFetch(`/api/items?${params}`)
       const fetched: InventoryItem[] = data.items
 
-      // Queue newly stale items for the donate prompt
       const newlyStale = fetched.filter(
         i => i.status === 'Stale' && !prevStaleIds.current.has(i.id)
       )
@@ -660,13 +864,27 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
 
       setItems(fetched)
       setSustainability(data.globalSustainability ?? null)
-    } catch {}
+    } catch (e: any) {
+      setFetchError(e.message || 'Failed to load items')
+    }
     finally { setLoading(false) }
-  }, [search, filterCategory, filterStatus, addToast])
+  }, [search, filterCategory, filterStatus])
 
   useEffect(() => { fetchItems() }, [fetchItems])
 
-  const handleDelete = (id: string) => setItems(prev => prev.filter(i => i.id !== id))
+  // Sort items client-side
+  const sortedItems = [...items].sort((a, b) => {
+    if (sortKey === 'addedAt') return new Date(b.addedAt).getTime() - new Date(a.addedAt).getTime()
+    if (sortKey === 'name') return a.name.localeCompare(b.name)
+    if (sortKey === 'riskLevel') return b.riskLevel - a.riskLevel
+    if (sortKey === 'weight') return b.weight - a.weight
+    return 0
+  })
+
+  const handleDelete = (id: string) => {
+    setItems(prev => prev.filter(i => i.id !== id))
+    setSelectedIds(prev => { const s = new Set(prev); s.delete(id); return s })
+  }
 
   const handleDonateConfirm = (item: InventoryItem) => {
     addToast(`"${item.name}" marked as donated — great work! 🌍`, 'success')
@@ -675,6 +893,58 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
   }
 
   const handleDonatesDismiss = () => setDonateQueue(prev => prev.slice(1))
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const s = new Set(prev)
+      s.has(id) ? s.delete(id) : s.add(id)
+      return s
+    })
+  }
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === sortedItems.length) {
+      setSelectedIds(new Set())
+    } else {
+      setSelectedIds(new Set(sortedItems.map(i => i.id)))
+    }
+  }
+
+  const handleBulkStatus = async (status: ItemStatus) => {
+    if (selectedIds.size === 0) return
+    setBulkLoading(true)
+    try {
+      await Promise.all(
+        [...selectedIds].map(id =>
+          apiFetch(`/api/items/${id}`, { method: 'PUT', body: JSON.stringify({ status }) })
+        )
+      )
+      addToast(`${selectedIds.size} item${selectedIds.size > 1 ? 's' : ''} marked as ${status}`)
+      setSelectedIds(new Set())
+      fetchItems()
+    } catch (e: any) {
+      addToast(e.message || 'Bulk update failed', 'error')
+    } finally { setBulkLoading(false) }
+  }
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.size === 0) return
+    setBulkLoading(true)
+    try {
+      await Promise.all(
+        [...selectedIds].map(id =>
+          apiFetch(`/api/items/${id}`, { method: 'DELETE' })
+        )
+      )
+      addToast(`${selectedIds.size} item${selectedIds.size > 1 ? 's' : ''} deleted`, 'warning')
+      setItems(prev => prev.filter(i => !selectedIds.has(i.id)))
+      setSelectedIds(new Set())
+    } catch (e: any) {
+      addToast(e.message || 'Bulk delete failed', 'error')
+      fetchItems()
+    } finally { setBulkLoading(false) }
+  }
+
   const activeCount = items.filter(i => i.status === 'Active').length
   const staleCount = items.filter(i => i.status === 'Stale').length
   const totalWeight = items.reduce((sum, i) => sum + i.weight, 0)
@@ -687,6 +957,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
         <div className="dash-brand"><span>♻️</span><span className="dash-brand-name">Circular</span></div>
         <div className="dash-user">
           <span className="dash-business">{user.businessName}</span>
+          <button className="btn-icon" onClick={() => setShowPasswordChange(true)} title="Change password">🔑</button>
           <button className="btn-logout" onClick={onLogout}>Sign out</button>
         </div>
       </header>
@@ -710,24 +981,59 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
           <option value="">All Statuses</option>
           {(['Active', 'Stale', 'Donated', 'Recycled'] as ItemStatus[]).map(s => <option key={s} value={s}>{s}</option>)}
         </select>
+        <select className="filter-select" value={sortKey} onChange={e => setSortKey(e.target.value as SortKey)}>
+          <option value="addedAt">Sort: Newest</option>
+          <option value="riskLevel">Sort: Risk (High→Low)</option>
+          <option value="name">Sort: Name (A→Z)</option>
+          <option value="weight">Sort: Weight (Heavy→Light)</option>
+        </select>
+        <button className="btn-secondary" onClick={() => exportCSV(items)} title="Export to CSV">⬇ CSV</button>
         <button className="btn-primary" onClick={() => setShowAdd(true)}>+ Add Item</button>
       </div>
 
+      {selectedIds.size > 0 && (
+        <div className="bulk-bar">
+          <span className="bulk-count">{selectedIds.size} selected</span>
+          <button className="btn-bulk" onClick={() => handleBulkStatus('Donated')} disabled={bulkLoading}>Mark Donated</button>
+          <button className="btn-bulk" onClick={() => handleBulkStatus('Recycled')} disabled={bulkLoading}>Mark Recycled</button>
+          <button className="btn-bulk btn-bulk-delete" onClick={handleBulkDelete} disabled={bulkLoading}>Delete</button>
+          <button className="btn-bulk btn-bulk-clear" onClick={() => setSelectedIds(new Set())}>Clear</button>
+        </div>
+      )}
+
       {loading ? (
         <div className="empty-state">Loading…</div>
+      ) : fetchError ? (
+        <div className="fetch-error">
+          <div className="fetch-error-icon">⚠️</div>
+          <p>{fetchError}</p>
+          <button className="btn-primary" onClick={fetchItems}>Tap to retry</button>
+        </div>
       ) : items.length === 0 ? (
         <div className="empty-state"><div className="empty-icon">📦</div><p>No items yet. Add your first one!</p></div>
       ) : (
-        <div className="items-grid">
-          {items.map(item => (
-            <ItemCard key={item.id} item={item} onDelete={handleDelete}
-              onStatusChange={fetchItems} onEdit={setEditItem} toast={addToast} />
-          ))}
-        </div>
+        <>
+          <div className="select-all-row">
+            <label className="select-all-label">
+              <input type="checkbox" checked={selectedIds.size === sortedItems.length && sortedItems.length > 0}
+                onChange={toggleSelectAll} />
+              Select all
+            </label>
+          </div>
+          <div className="items-grid">
+            {sortedItems.map(item => (
+              <ItemCard key={item.id} item={item} onDelete={handleDelete}
+                onStatusChange={fetchItems} onEdit={setEditItem} onHistory={setHistoryItem} toast={addToast}
+                selected={selectedIds.has(item.id)} onSelect={toggleSelect} />
+            ))}
+          </div>
+        </>
       )}
 
       {showAdd && <AddItemModal onClose={() => setShowAdd(false)} onAdded={fetchItems} toast={addToast} />}
       {editItem && <EditItemModal item={editItem} onClose={() => setEditItem(null)} onSaved={fetchItems} toast={addToast} />}
+      {showPasswordChange && <PasswordChangeModal onClose={() => setShowPasswordChange(false)} toast={addToast} />}
+      {historyItem && <ItemHistoryModal item={historyItem} onClose={() => setHistoryItem(null)} />}
       {donateQueue.length > 0 && (
         <DonateModal
           item={donateQueue[0].item}
@@ -744,6 +1050,17 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
 export default function App() {
   const [user, setUser] = useState<AuthUser | null>(null)
 
+  const handleLogout = () => {
+    localStorage.removeItem('token')
+    localStorage.removeItem('user')
+    setUser(null)
+  }
+
+  useEffect(() => {
+    // Register the 401 handler so expired tokens auto-redirect to login
+    setSessionExpiredHandler(handleLogout)
+  }, [])
+
   useEffect(() => {
     const token = localStorage.getItem('token')
     const stored = localStorage.getItem('user')
@@ -754,12 +1071,6 @@ export default function App() {
     localStorage.setItem('user', JSON.stringify(u))
     localStorage.setItem('token', token)
     setUser(u)
-  }
-
-  const handleLogout = () => {
-    localStorage.removeItem('token')
-    localStorage.removeItem('user')
-    setUser(null)
   }
 
   if (!user) return <AuthPage onAuth={handleAuth} />
