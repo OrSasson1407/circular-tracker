@@ -6,6 +6,7 @@ import { CreateItemRequest, UpdateItemRequest, RegisterRequest, LoginRequest } f
 import { PrismaClient, Category as PrismaCategory, ItemStatus } from './generated/prisma/client'
 import { PrismaPg } from '@prisma/adapter-pg'
 import { runWasteLogic } from './wasteLogic'
+import { calculateSustainability } from './sustainabilityLogic'
 
 // ─── Environment Check ───────────────────────────────────────────────────────
 
@@ -137,7 +138,8 @@ fastify.get<{
       },
       orderBy: { addedAt: 'desc' },
     })
-    return { items, totalCount: items.length }
+    const sustainability = await calculateSustainability(prisma, user.userId)
+    return { items, totalCount: items.length, globalSustainability: sustainability }
   } catch (error) {
     fastify.log.error(error)
     return reply.status(500).send({ error: 'Failed to fetch items' })
@@ -168,7 +170,7 @@ fastify.post<{ Body: CreateItemRequest }>('/api/items', async (request, reply) =
   const user = authenticate(request, reply)
   if (!user) return
 
-  const { name, category, weight, barcode } = request.body
+  const { name, category, weight, barcode, imageUrl } = request.body
 
   try {
     const newItem = await prisma.inventoryItem.create({
@@ -177,6 +179,7 @@ fastify.post<{ Body: CreateItemRequest }>('/api/items', async (request, reply) =
         category: normalizeCategory(category),
         weight,
         barcode,
+        imageUrl,
         userId: user.userId,
       },
     })
@@ -195,7 +198,7 @@ fastify.put<{ Params: { id: string }; Body: UpdateItemRequest }>(
     const user = authenticate(request, reply)
     if (!user) return
 
-    const { name, category, weight, barcode, status } = request.body
+    const { name, category, weight, barcode, imageUrl, status } = request.body
 
     try {
       const existing = await prisma.inventoryItem.findFirst({
@@ -210,6 +213,7 @@ fastify.put<{ Params: { id: string }; Body: UpdateItemRequest }>(
           ...(category !== undefined && { category: normalizeCategory(category) }),
           ...(weight !== undefined && { weight }),
           ...(barcode !== undefined && { barcode }),
+          ...(imageUrl !== undefined && { imageUrl }),
           ...(status !== undefined && { status: normalizeStatus(status) }),
           lastAccessedAt: new Date(),
         },
@@ -242,8 +246,21 @@ fastify.delete<{ Params: { id: string } }>('/api/items/:id', async (request, rep
   }
 })
 
-// ─── 9. POST /api/admin/run-waste-logic ──────────────────────────────────────
-// Manual trigger endpoint — useful for testing without waiting for the cron
+// ─── 9. GET /api/sustainability ──────────────────────────────────────────────
+
+fastify.get('/api/sustainability', async (request, reply) => {
+  const user = authenticate(request, reply)
+  if (!user) return
+  try {
+    const result = await calculateSustainability(prisma, user.userId)
+    return result
+  } catch (error) {
+    fastify.log.error(error)
+    return reply.status(500).send({ error: 'Failed to calculate sustainability score' })
+  }
+})
+
+// ─── 10. POST /api/admin/run-waste-logic ─────────────────────────────────────
 
 fastify.post('/api/admin/run-waste-logic', async (request, reply) => {
   const user = authenticate(request, reply)
@@ -263,7 +280,7 @@ const scheduleWasteLogic = () => {
   const runAt = () => {
     const now = new Date()
     const night = new Date()
-    night.setHours(24, 0, 0, 0) // next midnight
+    night.setHours(24, 0, 0, 0)
     return night.getTime() - now.getTime()
   }
 
@@ -271,7 +288,7 @@ const scheduleWasteLogic = () => {
     setTimeout(async () => {
       console.log('🕛 Running scheduled waste logic…')
       await runWasteLogic(prisma)
-      schedule() // reschedule for next midnight
+      schedule()
     }, runAt())
   }
 
@@ -283,11 +300,9 @@ const scheduleWasteLogic = () => {
 
 const start = async () => {
   try {
-    // Run once on startup to ensure risk levels are fresh
     console.log('🔄 Running initial waste logic check…')
     await runWasteLogic(prisma)
 
-    // Schedule daily runs
     scheduleWasteLogic()
 
     await fastify.listen({ port: 3001, host: '0.0.0.0' })

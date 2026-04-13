@@ -23,6 +23,20 @@ export interface SustainabilityScore {
   rank: 'Bronze' | 'Silver' | 'Gold' | 'Green Titan';
 }
 
+export interface SustainabilityBreakdown {
+  category: string;
+  co2Saved: number;
+  itemCount: number;
+  totalWeight: number;
+}
+
+export interface SustainabilityResult {
+  score: SustainabilityScore;
+  breakdown: SustainabilityBreakdown[];
+  totalItemsTracked: number;
+  totalWeightKg: number;
+}
+
 // 4. Auth types
 export interface RegisterRequest {
   email: string;
@@ -50,6 +64,7 @@ export interface CreateItemRequest {
   category: ItemCategory;
   weight: number;
   barcode?: string;
+  imageUrl?: string;
 }
 
 export interface UpdateItemRequest {
@@ -57,11 +72,12 @@ export interface UpdateItemRequest {
   category?: ItemCategory;
   weight?: number;
   barcode?: string;
+  imageUrl?: string;
   status?: 'Active' | 'Stale' | 'Donated' | 'Recycled';
 }
 
 export interface InventoryResponse {
   items: InventoryItem[];
   totalCount: number;
-  globalSustainability: SustainabilityScore;
+  globalSustainability: SustainabilityResult;
 }
